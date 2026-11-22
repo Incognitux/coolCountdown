@@ -177,6 +177,10 @@ const canvas = document.getElementById('bg');
 const ctx = canvas.getContext('2d');
 const timerEl = document.getElementById('timer');
 const labelEl = document.getElementById('label');
+
+// Click timer to toggle pause
+timerEl.style.cursor = 'pointer';
+timerEl.addEventListener('click', sendTogglePause);
 const syncStatus = document.getElementById('syncStatus');
 const authModal = document.getElementById('authModal');
 const authInput = document.getElementById('authInput');
@@ -228,7 +232,7 @@ for (let arm = 0; arm < ARMS; arm++) {
 }
 
 // Countdown state (synced from server)
-let totalSeconds = 300;
+let totalSeconds = 14400;  // 4 hours default
 let remaining = totalSeconds;
 let paused = false;
 let lastTick = performance.now();
@@ -316,6 +320,8 @@ async function handleAuth() {
 function initApp() {
   // Start WebSocket connection and render loop
   connect();
+  // Initial UI state (will be updated when server state arrives)
+  updatePausedUI();
   requestAnimationFrame(render);
 }
 
@@ -340,11 +346,10 @@ function connect() {
       paused = msg.paused;
       lastTick = performance.now();
       updateInputsFromTotal();
-      if (remaining <= 0) labelEl.textContent = 'Times Up!';
-      else labelEl.textContent = 'Mission Countdown';
+      updatePausedUI();
     } else if (msg.type === 'tick') {
       remaining = msg.remaining;
-      if (remaining <= 0) labelEl.textContent = 'Times Up!';
+      updatePausedUI();
     }
   };
 
@@ -371,6 +376,19 @@ function sendSetTime() {
 function sendTogglePause() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: 'toggle_pause' }));
+}
+
+function updatePausedUI() {
+  if (paused) {
+    timerEl.style.opacity = '0.5';
+    timerEl.style.filter = 'grayscale(1)';
+    labelEl.textContent = 'Paused';
+  } else {
+    timerEl.style.opacity = '1';
+    timerEl.style.filter = 'none';
+    if (remaining <= 0) labelEl.textContent = 'Times Up!';
+    else labelEl.textContent = 'Mission Countdown';
+  }
 }
 
 function updateInputsFromTotal() {

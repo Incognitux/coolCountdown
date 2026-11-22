@@ -20,8 +20,8 @@ AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "concrete-evidence-69")
 # Shared timer state
 class TimerState:
     def __init__(self):
-        self.total_seconds = 300  # 5 minutes default
-        self.remaining = 300
+        self.total_seconds = 14400  # 4 hours default
+        self.remaining = 14400
         self.paused = False
         self.last_update = None  # initialized on first tick
         self._lock = asyncio.Lock()
