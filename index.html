@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Space & Galaxies — Countdown</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #04060c;
+    overflow: hidden;
+    font-family: system-ui, -apple-system, sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-align: center;
+    z-index: 10;
+  }
+  #label {
+    font-size: clamp(1.1rem, 2.2vw, 2.3rem);
+    letter-spacing: 0.38em;
+    text-transform: uppercase;
+    color: #cbd5e1;
+    margin-bottom: 1rem;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
+  }
+  #timer {
+    font-size: clamp(5rem, 18vw, 18rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #f8fafc;
+    text-shadow: 0 0 48px rgba(129, 140, 248, 0.45), 0 4px 24px rgba(0, 0, 0, 0.95);
+    line-height: 1;
+  }
+  #controls {
+    position: fixed;
+    bottom: 18px;
+    right: 18px;
+    display: flex;
+    gap: 8px;
+    opacity: 0.15;
+    transition: opacity 0.2s;
+  }
+  #controls:hover { opacity: 1; }
+  button, input {
+    background: #0f172a;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  input { width: 70px; text-align: center; }
+  /* Hide number input spinners */
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Auth modal */
+  #authModal {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 6, 12, 0.98);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    gap: 1.5rem;
+  }
+  #authModal.hidden { display: none; }
+  #authModal h2 {
+    color: #f8fafc;
+    font-size: clamp(1.5rem, 4vw, 2.5rem);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-shadow: 0 0 24px rgba(129, 140, 248, 0.4);
+  }
+  #authModal .input-group {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
+  #authModal input[type="password"] {
+    width: 220px;
+    padding: 12px 16px;
+    font-size: 16px;
+    letter-spacing: 0.1em;
+  }
+  #authModal button {
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  #authModal button:hover {
+    background: #1e293b;
+    border-color: #6366f1;
+  }
+  #authError {
+    color: #f87171;
+    font-size: 14px;
+    min-height: 20px;
+    text-align: center;
+  }
+  #authLoading {
+    color: #94a3b8;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<!-- Auth modal -->
+<div id="authModal">
+  <h2>Mission Countdown</h2>
+  <div class="input-group">
+    <input type="password" id="authInput" placeholder="Enter password" autocomplete="current-password" spellcheck="false">
+    <button id="authBtn">Access</button>
+  </div>
+  <div id="authError"></div>
+  <div id="authLoading" class="hidden">Verifying…</div>
+</div>
+
+<div id="hud">
+  <div id="label">Mission Countdown</div>
+  <div id="timer">05:00</div>
+</div>
+<div id="controls">
+  <button id="menuBtn" title="Show controls" style="
+    background: #0f172a;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+  ">≡</button>
+  <div id="controlPanel" style="display: none; flex-direction: column; gap: 8px; margin-top: 8px;">
+    <div id="syncStatus" style="color: #94a3b8; font-size: 12px; text-align: center; min-height: 16px;">Connecting…</div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="color: #94a3b8; font-size: 13px;">Set Time</span>
+      <input id="inputHours" type="number" value="0" min="0" max="99" style="width: 50px; text-align: center;" placeholder="H">
+      <span style="color: #94a3b8;">:</span>
+      <input id="inputMins" type="number" value="5" min="0" max="59" style="width: 50px; text-align: center;" placeholder="M">
+      <span style="color: #94a3b8;">:</span>
+      <input id="inputSecs" type="number" value="0" min="0" max="59" style="width: 50px; text-align: center;" placeholder="S">
+    </div>
+    <button onclick="sendSetTime()">Set</button>
+    <button onclick="sendTogglePause()">Pause / Resume</button>
+    <button onclick="document.documentElement.requestFullscreen()">Fullscreen</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('bg');
+const ctx = canvas.getContext('2d');
+const timerEl = document.getElementById('timer');
+const labelEl = document.getElementById('label');
+const syncStatus = document.getElementById('syncStatus');
+const authModal = document.getElementById('authModal');
+const authInput = document.getElementById('authInput');
+const authBtn = document.getElementById('authBtn');
+const authError = document.getElementById('authError');
+const authLoading = document.getElementById('authLoading');
+
+let w, h, cx, cy, outerR;
+function resize() {
+  w = canvas.width = window.innerWidth * devicePixelRatio;
+  h = canvas.height = window.innerHeight * devicePixelRatio;
+  cx = w / 2;
+  cy = h / 2;
+  outerR = Math.hypot(cx, cy);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Deterministic PRNG for clean starfield & spiral knots
+let seed = 42069;
+function rand() {
+  seed = (seed * 1664525 + 1013904223) >>> 0;
+  return seed / 4294967296;
+}
+
+const stars = Array.from({ length: 220 }, () => ({
+  x: rand(),
+  y: rand(),
+  r: (0.8 + rand() * 2.0) * devicePixelRatio,
+  speed: 0.008 + rand() * 0.02,
+  phase: rand() * Math.PI * 2
+}));
+
+const ARMS = 4;
+const PARTICLES_PER_ARM = 95;
+const spiralDots = [];
+for (let arm = 0; arm < ARMS; arm++) {
+  const baseAngle = (arm / ARMS) * Math.PI * 2;
+  for (let i = 0; i < PARTICLES_PER_ARM; i++) {
+    const t = i / PARTICLES_PER_ARM; // 0 (inner) -> 1 (outer)
+    spiralDots.push({
+      armOffset: baseAngle,
+      t,
+      spread: (rand() - 0.5) * (0.28 + t * 0.45),
+      size: (1.4 + (1 - t * 0.5) * 2.8) * devicePixelRatio,
+      twinkle: rand() * Math.PI * 2
+    });
+  }
+}
+
+// Countdown state (synced from server)
+let totalSeconds = 300;
+let remaining = totalSeconds;
+let paused = false;
+let lastTick = performance.now();
+let ws = null;
+let reconnectTimer = null;
+let authVerified = false;
+
+// Check for stored auth on load
+function checkStoredAuth() {
+  const stored = localStorage.getItem('countdownAuth');
+  if (stored) {
+    authVerified = true;
+    authModal.classList.add('hidden');
+    initApp();
+  }
+}
+
+// Verify password with server
+async function verifyPassword(password) {
+  return new Promise((resolve) => {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = location.hostname || 'localhost';
+    const testWs = new WebSocket(`${protocol}//${host}:8081`);
+
+    const timeout = setTimeout(() => {
+      testWs.close();
+      resolve({ success: false, error: 'Connection timeout' });
+    }, 5000);
+
+    testWs.onopen = () => {
+      testWs.send(JSON.stringify({ type: 'auth', token: password }));
+    };
+
+    testWs.onmessage = (event) => {
+      clearTimeout(timeout);
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'state') {
+        testWs.close();
+        resolve({ success: true });
+      } else if (msg.type === 'error') {
+        testWs.close();
+        resolve({ success: false, error: msg.message || 'Invalid password' });
+      }
+    };
+
+    testWs.onerror = () => {
+      clearTimeout(timeout);
+      testWs.close();
+      resolve({ success: false, error: 'Connection failed' });
+    };
+
+    testWs.onclose = () => {
+      clearTimeout(timeout);
+    };
+  });
+}
+
+async function handleAuth() {
+  const password = authInput.value.trim();
+  if (!password) return;
+
+  authBtn.disabled = true;
+  authInput.disabled = true;
+  authError.textContent = '';
+  authLoading.classList.remove('hidden');
+
+  const result = await verifyPassword(password);
+
+  authLoading.classList.add('hidden');
+  authBtn.disabled = false;
+  authInput.disabled = false;
+
+  if (result.success) {
+    authVerified = true;
+    localStorage.setItem('countdownAuth', password);
+    authModal.classList.add('hidden');
+    initApp();
+  } else {
+    authError.textContent = result.error || 'Invalid password';
+    authInput.value = '';
+    authInput.focus();
+  }
+}
+
+function initApp() {
+  // Start WebSocket connection and render loop
+  connect();
+  requestAnimationFrame(render);
+}
+
+// WebSocket connection - token comes from user input / localStorage
+function connect() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = location.hostname || 'localhost';
+  const storedToken = localStorage.getItem('countdownAuth');
+  ws = new WebSocket(`${protocol}//${host}:8081`);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'auth', token: storedToken }));
+    syncStatus.textContent = '● Synced';
+    syncStatus.style.color = '#22c55e';
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'state') {
+      totalSeconds = msg.total_seconds;
+      remaining = msg.remaining;
+      paused = msg.paused;
+      lastTick = performance.now();
+      updateInputsFromTotal();
+      if (remaining <= 0) labelEl.textContent = 'Times Up!';
+      else labelEl.textContent = 'Mission Countdown';
+    } else if (msg.type === 'tick') {
+      remaining = msg.remaining;
+      if (remaining <= 0) labelEl.textContent = 'Times Up!';
+    }
+  };
+
+  ws.onclose = () => {
+    syncStatus.textContent = '○ Disconnected — retrying…';
+    syncStatus.style.color = '#fbbf24';
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    syncStatus.textContent = '○ Connection error';
+    syncStatus.style.color = '#ef4444';
+  };
+}
+
+function sendSetTime() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const h = Math.max(0, parseInt(document.getElementById('inputHours').value || '0', 10));
+  const m = Math.max(0, parseInt(document.getElementById('inputMins').value || '0', 10));
+  const s = Math.max(0, parseInt(document.getElementById('inputSecs').value || '0', 10));
+  ws.send(JSON.stringify({ type: 'set_time', hours: h, minutes: m, seconds: s }));
+}
+
+function sendTogglePause() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'toggle_pause' }));
+}
+
+function updateInputsFromTotal() {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  document.getElementById('inputHours').value = h;
+  document.getElementById('inputMins').value = m;
+  document.getElementById('inputSecs').value = s;
+}
+
+// Initialize inputs on load
+updateInputsFromTotal();
+
+// Menu button toggle
+const menuBtn = document.getElementById('menuBtn');
+const controlPanel = document.getElementById('controlPanel');
+let panelOpen = false;
+
+menuBtn.addEventListener('click', () => {
+  panelOpen = !panelOpen;
+  controlPanel.style.display = panelOpen ? 'flex' : 'none';
+  menuBtn.style.opacity = panelOpen ? '1' : '0.5';
+  menuBtn.textContent = panelOpen ? '×' : '≡';
+});
+
+menuBtn.addEventListener('mouseenter', () => {
+  menuBtn.style.opacity = '1';
+});
+menuBtn.addEventListener('mouseleave', () => {
+  if (!panelOpen) menuBtn.style.opacity = '0.5';
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); sendTogglePause(); }
+  if (e.key.toLowerCase() === 'r') sendSetTime();
+  if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen();
+});
+
+// Auth event listeners
+authBtn.addEventListener('click', handleAuth);
+authInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleAuth();
+});
+
+// Check stored auth on load
+checkStoredAuth();
+
+// Color interpolation helpers
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpColor(c1, c2, t) {
+  return [
+    Math.round(lerp(c1[0], c2[0], t)),
+    Math.round(lerp(c1[1], c2[1], t)),
+    Math.round(lerp(c1[2], c2[2], t))
+  ];
+}
+
+function getUrgencyColors(progress) {
+  const stops = [
+    { p: 1.0,  timer: [56, 189, 248],   ring: [56, 189, 248],   arm: [129, 140, 248],  core: [56, 189, 248],  label: [203, 213, 225] },
+    { p: 0.75, timer: [34, 197, 94],    ring: [34, 197, 94],    arm: [74, 222, 128],   core: [34, 197, 94],   label: [187, 247, 208] },
+    { p: 0.5,  timer: [234, 179, 8],    ring: [234, 179, 8],    arm: [250, 204, 21],   core: [234, 179, 8],   label: [254, 243, 199] },
+    { p: 0.25, timer: [249, 115, 22],   ring: [249, 115, 22],   arm: [251, 146, 60],   core: [249, 115, 22],  label: [255, 237, 213] },
+    { p: 0.0,  timer: [239, 68, 68],    ring: [239, 68, 68],    arm: [248, 113, 113],  core: [239, 68, 68],   label: [254, 202, 202] },
+  ];
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (progress <= stops[i].p && progress >= stops[i + 1].p) {
+      const t = (stops[i].p - progress) / (stops[i].p - stops[i + 1].p);
+      return {
+        timer: lerpColor(stops[i].timer, stops[i + 1].timer, t),
+        ring:  lerpColor(stops[i].ring,  stops[i + 1].ring,  t),
+        arm:   lerpColor(stops[i].arm,   stops[i + 1].arm,   t),
+        core:  lerpColor(stops[i].core,  stops[i + 1].core,  t),
+        label: lerpColor(stops[i].label, stops[i + 1].label, t),
+      };
+    }
+  }
+  return stops[stops.length - 1];
+}
+
+function render(now) {
+  const dt = (now - lastTick) / 1000;
+  lastTick = now;
+
+  // Local decrement for smooth animation between server ticks
+  if (!paused && remaining > 0) {
+    remaining = Math.max(0, remaining - dt);
+    if (remaining <= 0) labelEl.textContent = 'Times Up!';
+  }
+
+  const progress = totalSeconds > 0 ? remaining / totalSeconds : 0;
+  const colors = getUrgencyColors(progress);
+  const armRgb = `${colors.arm[0]}, ${colors.arm[1]}, ${colors.arm[2]}`;
+  const coreRgb = `${colors.core[0]}, ${colors.core[1]}, ${colors.core[2]}`;
+  const timerRgb = `${colors.timer[0]}, ${colors.timer[1]}, ${colors.timer[2]}`;
+  const ringRgb = `${colors.ring[0]}, ${colors.ring[1]}, ${colors.ring[2]}`;
+  const labelRgb = `${colors.label[0]}, ${colors.label[1]}, ${colors.label[2]}`;
+
+  // Update timer display
+  const hrs = Math.floor(remaining / 3600);
+  const mins = Math.floor((remaining % 3600) / 60);
+  const secs = Math.floor(remaining % 60);
+  timerEl.textContent = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+  // Clear canvas
+  ctx.fillStyle = '#04060c';
+  ctx.fillRect(0, 0, w, h);
+
+  const sec = now * 0.001;
+
+  // 1. Drifting starfield
+  for (const s of stars) {
+    const sx = ((s.x + sec * s.speed) % 1) * w;
+    const sy = s.y * h;
+    const alpha = 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(sec * 2.2 + s.phase));
+    ctx.beginPath();
+    ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(226, 232, 240, ${alpha.toFixed(3)})`;
+    ctx.fill();
+  }
+
+  // 2. Rotating spiral galaxy arms
+  const rot = sec * 0.14;
+  const minDim = Math.min(w, h);
+  const innerClearR = minDim * 0.23;
+  const maxSpiralR = outerR * 0.92;
+
+  for (const d of spiralDots) {
+    const radius = innerClearR + Math.pow(d.t, 0.85) * (maxSpiralR - innerClearR);
+    const twist = d.t * 3.6 + rot + d.spread;
+    const angle = d.armOffset + twist;
+    const x = cx + Math.cos(angle) * radius;
+    const y = cy + Math.sin(angle) * radius;
+
+    const pulse = 0.65 + 0.35 * Math.sin(sec * 2.5 + d.twinkle);
+    const alpha = (0.18 + 0.52 * (1 - d.t * 0.65)) * pulse;
+
+    ctx.beginPath();
+    ctx.arc(x, y, d.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${d.t < 0.35 ? coreRgb : armRgb}, ${alpha.toFixed(3)})`;
+    ctx.fill();
+  }
+
+  // 3. Soft dark vignette behind center numerals
+  const vig = ctx.createRadialGradient(cx, cy, minDim * 0.05, cx, cy, minDim * 0.36);
+  vig.addColorStop(0, 'rgba(4, 6, 12, 0.82)');
+  vig.addColorStop(0.7, 'rgba(4, 6, 12, 0.35)');
+  vig.addColorStop(1, 'rgba(4, 6, 12, 0)');
+  ctx.fillStyle = vig;
+  ctx.beginPath();
+  ctx.arc(cx, cy, minDim * 0.36, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 4. Orbital progress ring around countdown
+  const ringR = minDim * 0.25;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+  ctx.lineWidth = 3 * devicePixelRatio;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+  ctx.strokeStyle = `rgba(${ringRgb}, 0.9)`;
+  ctx.lineWidth = 5 * devicePixelRatio;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // 5. Update HUD text colors
+  timerEl.style.color = `rgb(${timerRgb})`;
+  timerEl.style.textShadow = `0 0 48px rgba(${timerRgb}, 0.45), 0 4px 24px rgba(0, 0, 0, 0.95)`;
+  labelEl.style.color = `rgb(${labelRgb})`;
+
+  requestAnimationFrame(render);
+}
+</script>
+</body>
+</html>
