@@ -17,6 +17,9 @@ import websockets
 import os
 AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "concrete-evidence-69")
 
+# State persistence file
+STATE_FILE = Path(__file__).parent / "timer_state.json"
+
 # Shared timer state
 class TimerState:
     def __init__(self):
@@ -26,6 +29,51 @@ class TimerState:
         self.last_update = None  # initialized on first tick
         self._lock = asyncio.Lock()
         self.clients = set()
+        self._save_task = None
+        self._load_state()
+
+    def _load_state(self):
+        """Load timer state from disk."""
+        try:
+            if STATE_FILE.exists():
+                with open(STATE_FILE) as f:
+                    data = json.load(f)
+                self.total_seconds = data.get("total_seconds", 14400)
+                self.remaining = data.get("remaining", 14400)
+                self.paused = data.get("paused", False)
+                print(f"Loaded state: {self.total_seconds}s total, {self.remaining:.1f}s remaining, paused={self.paused}")
+        except Exception as e:
+            print(f"Failed to load state: {e}")
+
+    async def _save_state(self):
+        """Save timer state to disk."""
+        try:
+            data = {
+                "total_seconds": self.total_seconds,
+                "remaining": self.remaining,
+                "paused": self.paused,
+            }
+            # Write atomically
+            tmp = STATE_FILE.with_suffix(".tmp")
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            tmp.replace(STATE_FILE)
+        except Exception as e:
+            print(f"Failed to save state: {e}")
+
+    def _schedule_save(self):
+        """Schedule a state save (debounced)."""
+        if self._save_task:
+            self._save_task.cancel()
+        self._save_task = asyncio.create_task(self._debounced_save())
+
+    async def _debounced_save(self):
+        """Wait a bit then save, to batch rapid changes."""
+        try:
+            await asyncio.sleep(1.0)  # debounce 1 second
+            await self._save_state()
+        except asyncio.CancelledError:
+            pass
 
     async def register(self, ws):
         self.clients.add(ws)
@@ -54,6 +102,7 @@ class TimerState:
             self.remaining = self.total_seconds
             self.paused = False
             self.last_update = asyncio.get_event_loop().time()
+            self._schedule_save()
             await self.broadcast(json.dumps({
                 "type": "state",
                 "total_seconds": self.total_seconds,
@@ -78,6 +127,7 @@ class TimerState:
                     dt = now - self.last_update
                     self.remaining = max(0, self.remaining - dt)
                     self.last_update = now
+            self._schedule_save()
             await self.broadcast(json.dumps({
                 "type": "state",
                 "total_seconds": self.total_seconds,
@@ -98,6 +148,7 @@ class TimerState:
                 self.last_update = now
                 if self.remaining <= 0:
                     self.remaining = 0
+                self._schedule_save()
                 await self.broadcast(json.dumps({
                     "type": "tick",
                     "remaining": self.remaining,
@@ -164,8 +215,16 @@ async def main():
     print("WebSocket server running on ws://0.0.0.0:8081")
     async with websockets.serve(ws_handler, "0.0.0.0", 8081):
         # Run tick loop
-        await tick_loop()
+        try:
+            await tick_loop()
+        finally:
+            # Save state on shutdown
+            await state._save_state()
+            print("State saved on shutdown")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
