@@ -6,6 +6,7 @@ Serves index.html and broadcasts timer state to all connected clients.
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler
 from socketserver import TCPServer
@@ -14,7 +15,6 @@ import websockets
 
 
 # Password for authentication (set via AUTH_TOKEN env var, default for dev)
-import os
 AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "concrete-evidence-69")
 
 # State persistence file
@@ -33,7 +33,7 @@ class TimerState:
         self._load_state()
 
     def _load_state(self):
-        """Load timer state from disk."""
+        """Load timer state from disk, deducting wall-clock time elapsed since last save."""
         try:
             if STATE_FILE.exists():
                 with open(STATE_FILE) as f:
@@ -41,17 +41,28 @@ class TimerState:
                 self.total_seconds = data.get("total_seconds", 14400)
                 self.remaining = data.get("remaining", 14400)
                 self.paused = data.get("paused", False)
+
+                # If the timer was running when we saved, subtract the time
+                # that passed between the last save and now.
+                saved_at = data.get("saved_at")
+                if saved_at is not None and not self.paused and self.remaining > 0:
+                    elapsed = time.time() - saved_at
+                    if elapsed > 0:
+                        self.remaining = max(0, self.remaining - elapsed)
+                        print(f"Deducted {elapsed:.1f}s of elapsed wall-clock time")
+
                 print(f"Loaded state: {self.total_seconds}s total, {self.remaining:.1f}s remaining, paused={self.paused}")
         except Exception as e:
             print(f"Failed to load state: {e}")
 
     async def _save_state(self):
-        """Save timer state to disk."""
+        """Save timer state to disk with a wall-clock timestamp."""
         try:
             data = {
                 "total_seconds": self.total_seconds,
                 "remaining": self.remaining,
                 "paused": self.paused,
+                "saved_at": time.time(),
             }
             # Write atomically
             tmp = STATE_FILE.with_suffix(".tmp")
@@ -98,7 +109,7 @@ class TimerState:
         async with self._lock:
             self.total_seconds = hours * 3600 + minutes * 60 + seconds
             if self.total_seconds == 0:
-                self.total_seconds = 300
+                self.total_seconds = 14400
             self.remaining = self.total_seconds
             self.paused = False
             self.last_update = asyncio.get_event_loop().time()
@@ -192,8 +203,14 @@ async def ws_handler(ws):
 
 async def tick_loop():
     """Background task to decrement timer and broadcast ticks."""
+    save_counter = 0
     while True:
         await state.tick()
+        save_counter += 1
+        # Persist state to disk every ~10 seconds (100 ticks × 0.1s)
+        if save_counter >= 100:
+            save_counter = 0
+            await state._save_state()
         await asyncio.sleep(0.1)  # 100ms tick rate
 
 
@@ -201,7 +218,10 @@ def run_http_server(port=8080):
     """Run HTTP server in a separate thread."""
     os.chdir(Path(__file__).parent)
     handler = SimpleHTTPRequestHandler
-    with TCPServer(("", port), handler) as httpd:
+    # Allow immediate port reuse to avoid "Address already in use" on restart
+    class ReuseAddrTCPServer(TCPServer):
+        allow_reuse_address = True
+    with ReuseAddrTCPServer(("", port), handler) as httpd:
         print(f"HTTP server running on http://0.0.0.0:{port}")
         httpd.serve_forever()
 
@@ -210,10 +230,12 @@ async def main():
     # Start HTTP server in background thread
     http_thread = threading.Thread(target=run_http_server, args=(8080,), daemon=True)
     http_thread.start()
+    # Give HTTP server a moment to bind
+    await asyncio.sleep(0.2)
 
     # Start WebSocket server
     print("WebSocket server running on ws://0.0.0.0:8081")
-    async with websockets.serve(ws_handler, "0.0.0.0", 8081):
+    async with websockets.serve(ws_handler, "0.0.0.0", 8081, reuse_address=True):
         # Run tick loop
         try:
             await tick_loop()

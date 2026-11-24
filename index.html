@@ -137,7 +137,7 @@
 
 <div id="hud">
   <div id="label">Mission Countdown</div>
-  <div id="timer">05:00</div>
+  <div id="timer">--:--:--</div>
 </div>
 <div id="controls">
   <button id="menuBtn" title="Show controls" style="
@@ -160,9 +160,9 @@
     <div id="syncStatus" style="color: #94a3b8; font-size: 12px; text-align: center; min-height: 16px;">Connecting…</div>
     <div style="display: flex; align-items: center; gap: 8px;">
       <span style="color: #94a3b8; font-size: 13px;">Set Time</span>
-      <input id="inputHours" type="number" value="0" min="0" max="99" style="width: 50px; text-align: center;" placeholder="H">
+      <input id="inputHours" type="number" value="4" min="0" max="99" style="width: 50px; text-align: center;" placeholder="H">
       <span style="color: #94a3b8;">:</span>
-      <input id="inputMins" type="number" value="5" min="0" max="59" style="width: 50px; text-align: center;" placeholder="M">
+      <input id="inputMins" type="number" value="0" min="0" max="59" style="width: 50px; text-align: center;" placeholder="M">
       <span style="color: #94a3b8;">:</span>
       <input id="inputSecs" type="number" value="0" min="0" max="59" style="width: 50px; text-align: center;" placeholder="S">
     </div>
@@ -231,14 +231,15 @@ for (let arm = 0; arm < ARMS; arm++) {
   }
 }
 
-// Countdown state (synced from server)
-let totalSeconds = 14400;  // 4 hours default
-let remaining = totalSeconds;
+// Countdown state (synced from server — no local defaults)
+let totalSeconds = 0;
+let remaining = 0;
 let paused = false;
-let lastTick = performance.now();
+let lastTick = 0;
 let ws = null;
 let reconnectTimer = null;
 let authVerified = false;
+let renderStarted = false;
 
 // Check for stored auth on load
 function checkStoredAuth() {
@@ -318,11 +319,8 @@ async function handleAuth() {
 }
 
 function initApp() {
-  // Start WebSocket connection and render loop
+  // Start WebSocket connection (render starts after first state received)
   connect();
-  // Initial UI state (will be updated when server state arrives)
-  updatePausedUI();
-  requestAnimationFrame(render);
 }
 
 // WebSocket connection - token comes from user input / localStorage
@@ -334,8 +332,6 @@ function connect() {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: 'auth', token: storedToken }));
-    syncStatus.textContent = '● Synced';
-    syncStatus.style.color = '#22c55e';
   };
 
   ws.onmessage = (event) => {
@@ -347,21 +343,30 @@ function connect() {
       lastTick = performance.now();
       updateInputsFromTotal();
       updatePausedUI();
+      if (!renderStarted) {
+        renderStarted = true;
+        requestAnimationFrame(render);
+      }
     } else if (msg.type === 'tick') {
       remaining = msg.remaining;
       updatePausedUI();
+    } else if (msg.type === 'error') {
+      // Auth failed - clear stored token and show auth modal
+      localStorage.removeItem('countdownAuth');
+      authModal.classList.remove('hidden');
+      authError.textContent = msg.message || 'Authentication failed';
+      if (reconnectTimer) clearTimeout(reconnectTimer);
     }
   };
 
   ws.onclose = () => {
-    syncStatus.textContent = '○ Disconnected — retrying…';
-    syncStatus.style.color = '#fbbf24';
-    reconnectTimer = setTimeout(connect, 2000);
+    // Only auto-reconnect if not an auth failure
+    if (localStorage.getItem('countdownAuth')) {
+      reconnectTimer = setTimeout(connect, 2000);
+    }
   };
 
   ws.onerror = () => {
-    syncStatus.textContent = '○ Connection error';
-    syncStatus.style.color = '#ef4444';
   };
 }
 
@@ -400,9 +405,6 @@ function updateInputsFromTotal() {
   document.getElementById('inputSecs').value = s;
 }
 
-// Initialize inputs on load
-updateInputsFromTotal();
-
 // Menu button toggle
 const menuBtn = document.getElementById('menuBtn');
 const controlPanel = document.getElementById('controlPanel');
@@ -423,6 +425,7 @@ menuBtn.addEventListener('mouseleave', () => {
 });
 
 window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;   // ignore browser shortcuts
   if (e.code === 'Space') { e.preventDefault(); sendTogglePause(); }
   if (e.key.toLowerCase() === 'r') sendSetTime();
   if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen();
